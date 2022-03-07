@@ -2,6 +2,7 @@ package modes
 
 import (
 	"os"
+    "path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -50,6 +51,7 @@ type NavigationSpec struct {
 type navigationState struct {
 	Filtering  bool
 	ShowHidden bool
+	BaseDir    string
 }
 
 type navigation struct {
@@ -61,6 +63,11 @@ type navigation struct {
 	lastFilter string
 	stateMutex sync.RWMutex
 	state      navigationState
+}
+
+func (w *navigation) Dismiss() {
+	// FIXME: does this need to go via MutateState?
+	os.Chdir(w.state.BaseDir)
 }
 
 func (w *navigation) MutateState(f func(*navigationState)) {
@@ -159,6 +166,10 @@ func NewNavigation(app cli.App, spec NavigationSpec) (Navigation, error) {
 	if err != nil {
 		return nil, err
 	}
+    baseDir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
 	if spec.Cursor == nil {
 		spec.Cursor = NewOSNavigationCursor(os.Chdir)
 	}
@@ -189,6 +200,9 @@ func NewNavigation(app cli.App, spec NavigationSpec) (Navigation, error) {
 			OnLeft:  func(tk.ColView) { w.ascend() },
 			OnRight: func(tk.ColView) { w.descend() },
 		}),
+		state: navigationState{
+			BaseDir:  baseDir,
+		},
 	}
 	updateState(w, "")
 	return w, nil
@@ -201,7 +215,19 @@ func (w *navigation) SelectedName() string {
 	}
 	state := col.CopyState()
 	if 0 <= state.Selected && state.Selected < state.Items.Len() {
-		return state.Items.(fileItems)[state.Selected].Name()
+		fname := state.Items.(fileItems)[state.Selected].Name()
+		// Get absolute path
+		pwd, err := os.Getwd()
+		if err != nil {
+			return fname
+		}
+		absname := filepath.Join(pwd, fname)
+		// Get relative path
+		relname, err := filepath.Rel(w.state.BaseDir, absname)
+		if err != nil {
+			return absname
+		}
+		return relname
 	}
 	return ""
 }
